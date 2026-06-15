@@ -1,0 +1,101 @@
+# route_authoring_tool — all tunables in one file.
+# Load with: route_editor --config <this file>  or  bag_to_route --config <this file>
+# Both tools merge these values on top of built-in defaults; missing keys are fine.
+
+# ---------------------------------------------------------------- inputs / outputs
+io:
+  # ROS 2 bag directory (the folder that contains metadata.yaml + *.db3).
+  # Leave empty when opening an existing waypoint YAML directly with route_editor.
+  bag_path: ""
+
+  # Optional: start from an existing waypoints YAML instead of (or after)
+  # extracting from a bag. The editor saves back here unless output_path is set.
+  input_waypoints: ""
+
+  # Where to write the resulting waypoints YAML. If empty, defaults next to the
+  # bag (route_from_bag.yaml) or alongside input_waypoints (edited.yaml).
+  output_path: ""
+
+# ---------------------------------------------------------------- bag extraction
+bag:
+  # Topic names recorded during the teleop run.
+  rtk_fix_topic:     /rtk/fix
+  rtk_heading_topic: /rtk_heading/float
+  imu_topic:         /imu/data
+  odom_topic:        /Odometry
+
+  # NavSatFix.status.status threshold. Messages with status below this are
+  # treated as "no fix" and dropped (NavSatStatus: -1 NO_FIX, 0 FIX, 1 SBAS,
+  # 2 GBAS). For RTK runs you can leave at 0; raise to 2 to keep only RTK-grade.
+  nav_sat_status_min: 0
+
+  # If the bag has a very high fix rate, take every Nth message before RDP runs.
+  # 1 = keep everything. 5 = keep 1-in-5. Speeds up loading on long drives.
+  pre_decimate_every_n: 1
+
+# ---------------------------------------------------------------- downsampling
+downsample:
+  # Ramer-Douglas-Peucker tolerance, in METERS. Points whose perpendicular
+  # deviation from the simplified line is below this are dropped. Smaller value
+  # keeps the route faithful, larger value drops more straights.
+  rdp_epsilon_m: 0.4
+
+  # Maximum allowed segment length after RDP. Any segment longer than this is
+  # split with evenly-spaced intermediates so the consumer's lookahead window
+  # always has enough samples (hybrid_smooth_path_follower expects ~2.5 m).
+  max_segment_m: 5.0
+
+  # Drop the very first samples (often no-fix or stationary noise at boot).
+  trim_head_samples: 0
+  trim_tail_samples: 0
+
+# ---------------------------------------------------------------- output schema
+output:
+  # Row ordering written to the YAML. The consumer accepts both; lat_lon is
+  # less ambiguous when humans read the file.
+  waypoint_order: lat_lon   # or lon_lat
+
+  # Number of decimal places written for each lat/lon value. 8 ≈ 1.1 mm at
+  # the equator — plenty for RTK.
+  coord_decimals: 8
+
+# ---------------------------------------------------------------- editor (matplotlib)
+editor:
+  # Figure size in inches (matplotlib).
+  figure_size_inches: [11.0, 9.0]
+
+  # Background colour for the plot area. Pure white per request.
+  background_color: "#ffffff"
+
+  # Show the raw GPS trail behind the simplified waypoints (light gray).
+  show_raw_trail: true
+  raw_trail_alpha: 0.35
+  raw_trail_color: "#888888"
+
+  # Waypoint marker style.
+  waypoint_color: "#cc2222"
+  waypoint_marker_size: 9
+  path_line_color: "#225a99"
+  path_line_width: 1.8
+
+  # Selected/hovered waypoint highlight.
+  selected_color: "#ffaa00"
+  selected_marker_size: 14
+
+  # Click projection thresholds (in METERS of the local equirectangular frame).
+  # If a click lands within waypoint_pick_radius_m of an existing waypoint,
+  # the editor treats it as "pick that waypoint" (select/drag/delete).
+  # Otherwise, if it lands within snap_tolerance_m of any path segment, the
+  # editor projects the click perpendicularly onto that segment and inserts
+  # a new waypoint at the projected point. Clicks farther than both are ignored.
+  waypoint_pick_radius_m: 0.6
+  snap_tolerance_m: 1.5
+
+  # Maximum undo stack depth.
+  undo_depth: 50
+
+  # Auto-save on quit. If false, you must press 's' to save.
+  autosave_on_quit: false
+
+  # Status bar updates per second cap (drawing throttling).
+  status_refresh_hz: 20.0

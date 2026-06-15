@@ -1,0 +1,29 @@
+# Python build artifacts
+__pycache__/
+*.py[cod]
+*$py.class
+*.egg-info/
+*.egg
+.eggs/
+
+# colcon / ament build trees (in case anyone builds in-tree)
+build/
+install/
+log/
+
+# pytest / coverage
+.pytest_cache/
+.coverage
+htmlcov/
+
+# Editor / IDE
+.vscode/
+.idea/
+*.swp
+*.swo
+.DS_Store
+
+# Local user output (the tool writes waypoint YAMLs anywhere the user points it;
+# keep example/test outputs out of version control by default).
+/output/
+*.local.yaml
