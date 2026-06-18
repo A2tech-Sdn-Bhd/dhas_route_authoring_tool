@@ -27,3 +27,5 @@ htmlcov/
 # keep example/test outputs out of version control by default).
 /output/
 *.local.yaml
+
+resource/bags
