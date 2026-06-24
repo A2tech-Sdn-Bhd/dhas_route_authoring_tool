@@ -157,26 +157,43 @@ The headline knobs you will actually touch:
 ## Output format
 
 The YAML matches the schema accepted by `hybrid_smooth_path_follower`’s
-`visual_debug_node._load_waypoints`:
+`route_follower_node._load_waypoints`:
 
 ```yaml
 coordinate_mode: latlon
 waypoint_order: lat_lon
+estimated_duration_min: 19.02      # auto-computed at save; hand-edit to override
 waypoints:
   - [2.90279575, 101.28969915]
   - [2.90281099, 101.28969915]
   ...
 ```
 
-The file’s top-level `coordinate_mode` and `waypoint_order` keys **override**
-the consumer’s parameter values at load time, so you can drop this file
-into any existing `visual_debug_params.yaml` setup without changing the
-consumer’s `waypoint_coordinate_mode` / `gps_waypoint_order` params.
+`estimated_duration_min` is computed as
+`polyline_length / estimation.nominal_speed_mps / 60` and surfaced via
+`mission_server`'s `RouteInfo` for operator UIs. The follower itself
+ignores the field; legacy routes without it still load (the consumer
+recomputes from its own configured speed).
 
-Drop the path into `visual_debug_params.yaml`:
+The file’s top-level `coordinate_mode` and `waypoint_order` keys
+**override** the consumer’s parameter values at load time, so you can
+drop this file into any existing `route_follower_params.yaml` setup
+without changing the consumer’s `waypoint_coordinate_mode` /
+`gps_waypoint_order` params.
+
+Two ways to point the follower at your route:
 
 ```yaml
+# A. Standalone route_follower: edit route_follower_params.yaml
 waypoints_file: "/abs/path/to/my_route.yaml"
+```
+
+```bash
+# B. Via mission_server (recommended for real missions): drop the file
+#    into mission_server/config/routes/ and run a mission by name.
+ros2 action send_goal /mission/run \
+  mission_server_interfaces/action/RunMission \
+  "{route_name: 'my_route'}" --feedback
 ```
 
 ---
@@ -229,7 +246,7 @@ topics block updated, or temporarily edit `config/route_authoring.yaml`
 under `bag.rtk_fix_topic`.
 
 **Saved YAML doesn’t load in the path follower.**
-Check that `visual_debug_params.yaml` points at the absolute path, and
+Check that `route_follower_params.yaml` points at the absolute path, and
 that the file you’re writing has `coordinate_mode: latlon` and a
 `waypoints:` list — those three pieces are what the consumer keys on.
 

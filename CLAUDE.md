@@ -51,7 +51,7 @@ The pipeline:
 1. `bag_reader.read_bag` opens the rosbag2 directory with `SequentialReader`, filters `NavSatFix` by `status.status >= nav_sat_status_min`, decimates by `pre_decimate_every_n`, returns a `BagTrail` of `(timestamp_ns, lat, lon)` tuples. Heading samples are kept for visualization only and never reach the YAML.
 2. `downsample.downsample_trail_latlon` projects the trail to the local frame, runs **RDP with epsilon in METERS** (iterative, stack-based — no recursion limit on 10k-point trails), then a **max-segment-length pass** that splits any leftover segment longer than `max_segment_m` with evenly-spaced intermediates. Both stages preserve the first and last samples.
 3. `editor.RouteEditor` opens a matplotlib window with the raw trail, the simplified polyline, and the waypoint markers. State is held in the **local-meters frame** so distances and snap tolerances behave intuitively.
-4. `waypoint_io.save_waypoints` writes the YAML in the exact schema `visual_debug_node._load_waypoints` accepts.
+4. `waypoint_io.save_waypoints` writes the YAML in the exact schema `route_follower_node._load_waypoints` accepts.
 
 ### Click projection (the core editor behaviour)
 
@@ -61,7 +61,7 @@ When the user left-clicks anywhere near the path, the editor does **not** insert
 
 ### Output YAML schema (must match the consumer)
 
-The consumer accepts both `[a, b]` list rows (respecting top-level `waypoint_order`) and `{lat, lon}` dict rows (which ignore order). We write list rows because the existing production routes use them. See `hybrid_smooth_path_follower/visual_debug_node.py:_load_waypoints` for the loader and `hybrid_smooth_path_follower/waypoints/example_*.yaml` for reference files.
+The consumer accepts both `[a, b]` list rows (respecting top-level `waypoint_order`) and `{lat, lon}` dict rows (which ignore order). We write list rows because the existing production routes use them. See `hybrid_smooth_path_follower/route_follower_node.py:_load_waypoints` for the loader and `hybrid_smooth_path_follower/waypoints/example_*.yaml` for reference files.
 
 ```yaml
 coordinate_mode: latlon
@@ -72,7 +72,7 @@ waypoints:
 ```
 
 `save_waypoints` writes `estimated_duration_min = (polyline_length_m /
-estimation.nominal_speed_mps) / 60`. The follower (`visual_debug_node`)
+estimation.nominal_speed_mps) / 60`. The follower (`route_follower_node`)
 ignores the field; the downstream consumer (`mission_server` →
 `RouteInfo.estimated_duration_min` → operator UI) reads it verbatim, or
 recomputes from its own configured speed when the field is absent.
@@ -81,7 +81,7 @@ prefers the file value over recomputation.
 
 ## Important constraints
 
-- **Output must round-trip through `visual_debug_node._load_waypoints` without parameter overrides.** Top-level `coordinate_mode` and `waypoint_order` in the file override the consumer's params at load time — wrong values silently change the runtime mode. The writer must keep emitting both keys.
+- **Output must round-trip through `route_follower_node._load_waypoints` without parameter overrides.** Top-level `coordinate_mode` and `waypoint_order` in the file override the consumer's params at load time — wrong values silently change the runtime mode. The writer must keep emitting both keys.
 - **No `rclpy.init`** in this package. `rclpy.serialization.deserialize_message` and `rosidl_runtime_py.utilities.get_message` work without it; spinning a node would be wrong for an offline tool.
 - **`LocalFrame` anchor is the first sample of the source trail (or the first sample of the input YAML when re-editing).** Do not switch to centroid-anchoring without updating every distance threshold — RDP epsilon, snap tolerance, pick radius, max-segment cap are all expressed in meters of THIS frame.
 - **The matplotlib editor blocks the main thread.** It is called via `plt.show()`; do not try to interleave it with other rclpy spin loops.

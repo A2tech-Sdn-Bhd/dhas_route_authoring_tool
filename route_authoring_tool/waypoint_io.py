@@ -1,6 +1,6 @@
 """Read/write the YAML schema consumed by hybrid_smooth_path_follower.
 
-Schema (from ``visual_debug_node._load_waypoints``):
+Schema (from ``route_follower_node._load_waypoints``):
 
     coordinate_mode: latlon
     waypoint_order: lat_lon   # or lon_lat
