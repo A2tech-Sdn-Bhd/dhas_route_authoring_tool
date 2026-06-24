@@ -17,9 +17,11 @@ from __future__ import annotations
 
 import os
 from dataclasses import dataclass
-from typing import List, Sequence, Tuple
+from typing import List, Optional, Sequence, Tuple
 
 import yaml
+
+from .geo import polyline_length_m_latlon
 
 
 _VALID_ORDERS = ('lat_lon', 'lon_lat')
@@ -31,6 +33,10 @@ class WaypointFile:
     waypoints_latlon: List[Tuple[float, float]]  # always stored (lat, lon) internally
     waypoint_order: str = 'lat_lon'              # how to write rows on save
     coordinate_mode: str = 'latlon'              # consumer accepts xy too, but we author latlon
+    # Operator-facing drive-time estimate (minutes). Auto-computed at save
+    # time from polyline length / nominal speed; set to None when the file
+    # has no such field (older routes — the consumer recomputes at load).
+    estimated_duration_min: Optional[float] = None
 
 
 def _load_yaml_dict(path: str) -> dict:
@@ -79,7 +85,24 @@ def load_waypoints(path: str) -> WaypointFile:
         except Exception as exc:  # noqa: BLE001 - one bad row shouldn't kill the load
             raise ValueError(f'{expanded}: row {idx} is malformed: {row} ({exc})') from exc
 
-    return WaypointFile(waypoints_latlon=pts, waypoint_order=order, coordinate_mode='latlon')
+    raw_estimate = data.get('estimated_duration_min')
+    estimate: Optional[float]
+    if raw_estimate is None:
+        estimate = None
+    else:
+        try:
+            estimate = float(raw_estimate)
+        except (TypeError, ValueError) as exc:
+            raise ValueError(
+                f'{expanded}: estimated_duration_min must be a number, got {raw_estimate!r}'
+            ) from exc
+
+    return WaypointFile(
+        waypoints_latlon=pts,
+        waypoint_order=order,
+        coordinate_mode='latlon',
+        estimated_duration_min=estimate,
+    )
 
 
 def _parse_row(row, order: str) -> Tuple[float, float]:
@@ -98,14 +121,32 @@ def _parse_row(row, order: str) -> Tuple[float, float]:
     return a, b       # lat_lon
 
 
+def estimate_duration_min(
+    waypoints_latlon: Sequence[Tuple[float, float]],
+    nominal_speed_mps: float,
+) -> float:
+    """Auto-compute a drive-time estimate (minutes) from polyline length."""
+    speed = max(1e-3, float(nominal_speed_mps))
+    length = polyline_length_m_latlon(waypoints_latlon)
+    return (float(length) / speed) / 60.0
+
+
 def save_waypoints(
     waypoints_latlon: Sequence[Tuple[float, float]],
     output_path: str,
     waypoint_order: str = 'lat_lon',
     coord_decimals: int = 8,
     header_comment: str | None = None,
+    nominal_speed_mps: float = 0.5,
+    estimated_duration_min_override: Optional[float] = None,
 ) -> str:
     """Write a YAML the hybrid_smooth_path_follower will load directly.
+
+    Auto-computes ``estimated_duration_min`` from the polyline length and
+    ``nominal_speed_mps`` unless ``estimated_duration_min_override`` is set
+    (in which case the override is written verbatim). The consumer prefers
+    the YAML field but recomputes from its own configured speed if the
+    field is missing — older routes still work.
 
     Returns the absolute path that was written. Existing files are
     overwritten (the editor manages its own backups if it wants any).
@@ -120,6 +161,11 @@ def save_waypoints(
     if parent:
         os.makedirs(parent, exist_ok=True)
 
+    if estimated_duration_min_override is not None:
+        duration_min = float(estimated_duration_min_override)
+    else:
+        duration_min = estimate_duration_min(waypoints_latlon, nominal_speed_mps)
+
     fmt = f'{{:.{int(coord_decimals)}f}}'
     lines: List[str] = []
     if header_comment:
@@ -127,6 +173,11 @@ def save_waypoints(
             lines.append(f'# {ln}' if ln else '#')
     lines.append('coordinate_mode: latlon')
     lines.append(f'waypoint_order: {waypoint_order}')
+    # Drive-time estimate (minutes). Auto-computed unless the caller passed an
+    # override; downstream UI / mission_server display this verbatim.
+    # Manual override: edit this value after saving — the consumer prefers
+    # it over recomputing from polyline length.
+    lines.append(f'estimated_duration_min: {duration_min:.2f}')
     lines.append('waypoints:')
     for lat, lon in waypoints_latlon:
         if waypoint_order == 'lon_lat':
@@ -141,4 +192,9 @@ def save_waypoints(
     return expanded
 
 
-__all__ = ['WaypointFile', 'load_waypoints', 'save_waypoints']
+__all__ = [
+    'WaypointFile',
+    'estimate_duration_min',
+    'load_waypoints',
+    'save_waypoints',
+]

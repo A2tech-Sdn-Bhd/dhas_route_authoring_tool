@@ -119,6 +119,7 @@ def bag_to_route_main(argv: Optional[List[str]] = None) -> int:
         output_path,
         waypoint_order=cfg.output.waypoint_order,
         coord_decimals=cfg.output.coord_decimals,
+        nominal_speed_mps=cfg.estimation.nominal_speed_mps,
         header_comment=(
             f'Extracted by route_authoring_tool from {cfg.io.bag_path}\n'
             f'raw fix samples kept: {len(raw_latlons)}\n'
@@ -187,6 +188,7 @@ def route_editor_main(argv: Optional[List[str]] = None) -> int:
         output_path=output_path,
         editor_cfg=cfg.editor,
         output_cfg=cfg.output,
+        nominal_speed_mps=cfg.estimation.nominal_speed_mps,
         raw_trail_latlon=raw_latlons if raw_latlons else None,
         input_path_for_reload=reload_path,
     )

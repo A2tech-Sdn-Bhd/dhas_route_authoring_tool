@@ -40,6 +40,14 @@ DEFAULTS: Dict[str, Any] = {
         'waypoint_order': 'lat_lon',
         'coord_decimals': 8,
     },
+    'estimation': {
+        # Nominal forward speed used to estimate route drive-time at save
+        # time. Written into the YAML as ``estimated_duration_min`` for the
+        # UI/mission_server to consume. To override per route, edit the
+        # ``estimated_duration_min`` field in the saved YAML directly —
+        # ``route_authoring_tool`` only writes the auto-computed value.
+        'nominal_speed_mps': 0.5,
+    },
     'editor': {
         'figure_size_inches': [11.0, 9.0],
         'background_color': '#ffffff',
@@ -93,6 +101,11 @@ class OutputConfig:
 
 
 @dataclass
+class EstimationConfig:
+    nominal_speed_mps: float
+
+
+@dataclass
 class EditorConfig:
     figure_size_inches: Tuple[float, float]
     background_color: str
@@ -118,6 +131,7 @@ class RouteAuthoringConfig:
     bag: BagConfig
     downsample: DownsampleConfig
     output: OutputConfig
+    estimation: EstimationConfig
     editor: EditorConfig
     source_path: Optional[str] = None
     raw: Dict[str, Any] = field(default_factory=dict)
@@ -159,6 +173,7 @@ def load_config(path: Optional[str] = None) -> RouteAuthoringConfig:
         bag=BagConfig(**merged['bag']),
         downsample=DownsampleConfig(**merged['downsample']),
         output=OutputConfig(**merged['output']),
+        estimation=EstimationConfig(**merged['estimation']),
         editor=_editor_from_dict(merged['editor']),
         source_path=source_path,
         raw=merged,
@@ -213,6 +228,7 @@ __all__ = [
     'BagConfig',
     'DownsampleConfig',
     'OutputConfig',
+    'EstimationConfig',
     'EditorConfig',
     'DEFAULTS',
     'load_config',

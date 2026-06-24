@@ -59,6 +59,17 @@ output:
   # the equator — plenty for RTK.
   coord_decimals: 8
 
+# ---------------------------------------------------------------- estimation
+estimation:
+  # Nominal forward speed used to estimate route drive-time when writing the
+  # YAML. ``save_waypoints`` writes
+  # ``estimated_duration_min = (polyline_length / nominal_speed_mps) / 60``
+  # into the file. The mission_server / UI display this value verbatim.
+  # To override per route, edit the ``estimated_duration_min`` field in the
+  # saved YAML after authoring — the consumer prefers the file value when
+  # present.
+  nominal_speed_mps: 0.5
+
 # ---------------------------------------------------------------- editor (matplotlib)
 editor:
   # Figure size in inches (matplotlib).

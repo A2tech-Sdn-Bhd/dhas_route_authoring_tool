@@ -66,9 +66,18 @@ The consumer accepts both `[a, b]` list rows (respecting top-level `waypoint_ord
 ```yaml
 coordinate_mode: latlon
 waypoint_order: lat_lon   # or lon_lat
+estimated_duration_min: 0.67   # auto-computed at save; hand-edit to override
 waypoints:
   - [lat, lon]
 ```
+
+`save_waypoints` writes `estimated_duration_min = (polyline_length_m /
+estimation.nominal_speed_mps) / 60`. The follower (`visual_debug_node`)
+ignores the field; the downstream consumer (`mission_server` →
+`RouteInfo.estimated_duration_min` → operator UI) reads it verbatim, or
+recomputes from its own configured speed when the field is absent.
+Manual override path: edit the field in the saved YAML — the consumer
+prefers the file value over recomputation.
 
 ## Important constraints
 
