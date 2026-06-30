@@ -3,12 +3,14 @@
 Two tools share one config file:
 
 * ``bag_to_route`` — read a bag, downsample, write a waypoints YAML. No GUI.
-* ``route_editor`` — open the matplotlib editor on an existing YAML, or
-  extract from a bag first and then open. Save back to disk on demand.
+* ``route_editor`` — open the matplotlib editor on one or more existing
+  YAMLs, or extract from a bag first and then open. Save back to disk
+  on demand.
 
 Both honour the same ``--config`` file. Common per-run overrides
 (``--bag``, ``--input``, ``--output``) are also accepted on the command
-line and win over the config file's values.
+line and win over the config file's values. ``--input`` accepts multiple
+paths so the editor can hold more than one route at a time.
 """
 
 from __future__ import annotations
@@ -33,8 +35,21 @@ def _build_common_parser(description: str) -> argparse.ArgumentParser:
         help='Path to route_authoring.yaml. Defaults to the installed share copy.',
     )
     parser.add_argument('--bag', help='Override io.bag_path from the config.')
-    parser.add_argument('--input', help='Override io.input_waypoints from the config.')
-    parser.add_argument('--output', '-o', help='Override io.output_path from the config.')
+    parser.add_argument(
+        '--input', nargs='+',
+        help=(
+            'One or more existing waypoint YAML paths. Overrides io.input_waypoints. '
+            'Pass multiple to load several routes into the editor at once.'
+        ),
+    )
+    parser.add_argument(
+        '--output', '-o', nargs='+',
+        help=(
+            'Output YAML path(s). With a single input you may pass one path; with '
+            'multiple inputs pass N paths positionally paired with the inputs, or '
+            'omit to default each to <input_stem>_edited.yaml.'
+        ),
+    )
     return parser
 
 
@@ -43,10 +58,8 @@ def _resolve_config(args: argparse.Namespace) -> RouteAuthoringConfig:
     cfg = load_config(path)
     if args.bag:
         cfg.io.bag_path = args.bag
-    if args.input:
-        cfg.io.input_waypoints = args.input
-    if args.output:
-        cfg.io.output_path = args.output
+    # input/output overrides are list-shaped now — handled in the route_editor
+    # entry point so the config dataclass stays single-string.
     return cfg
 
 
@@ -89,6 +102,41 @@ def _extract_from_bag(
     return waypoints_latlon, raw_latlons, frame
 
 
+def _resolve_input_paths(args: argparse.Namespace, cfg: RouteAuthoringConfig) -> List[str]:
+    """CLI multi-input wins over the single-string config field."""
+    if args.input:
+        return [os.path.expanduser(p) for p in args.input]
+    if cfg.io.input_waypoints:
+        return [os.path.expanduser(cfg.io.input_waypoints)]
+    return []
+
+
+def _resolve_output_paths(
+    args: argparse.Namespace,
+    cfg: RouteAuthoringConfig,
+    input_paths: List[str],
+) -> List[str]:
+    """Pair output paths to inputs. Defaults to <stem>_edited.yaml per input."""
+    n = len(input_paths)
+    if args.output:
+        outs = [os.path.expanduser(p) for p in args.output]
+        if len(outs) == 1 and n > 1:
+            raise ValueError(
+                f'--output got 1 path but {n} inputs were supplied; pass {n} outputs '
+                f'positionally, or omit --output to use <input>_edited.yaml defaults.'
+            )
+        if len(outs) not in (0, n):
+            raise ValueError(
+                f'--output count ({len(outs)}) must match --input count ({n}).'
+            )
+        return outs
+    # No CLI --output. Single-input case can fall back to cfg.io.output_path.
+    if n == 1 and cfg.io.output_path:
+        return [os.path.expanduser(cfg.io.output_path)]
+    # Multi-input case (or no config output_path): default per-input.
+    return [_default_output_for_yaml(p) for p in input_paths]
+
+
 # ---------------------------------------------------------------- bag_to_route
 def bag_to_route_main(argv: Optional[List[str]] = None) -> int:
     parser = _build_common_parser(
@@ -106,7 +154,18 @@ def bag_to_route_main(argv: Optional[List[str]] = None) -> int:
               file=sys.stderr)
         return 2
 
-    output_path = cfg.io.output_path or _default_output_for_bag(cfg.io.bag_path)
+    # bag_to_route is intentionally single-output. If the user passed multiple
+    # --output paths it's almost certainly a mistake — fail loudly.
+    if args.output and len(args.output) > 1:
+        print(
+            '[bag_to_route] only one --output is meaningful for a single bag extract; '
+            f'got {len(args.output)}.',
+            file=sys.stderr,
+        )
+        return 2
+
+    cli_output = args.output[0] if args.output else None
+    output_path = cli_output or cfg.io.output_path or _default_output_for_bag(cfg.io.bag_path)
 
     try:
         waypoints_latlon, raw_latlons, _frame = _extract_from_bag(cfg)
@@ -137,7 +196,7 @@ def bag_to_route_main(argv: Optional[List[str]] = None) -> int:
 # ---------------------------------------------------------------- route_editor
 def route_editor_main(argv: Optional[List[str]] = None) -> int:
     parser = _build_common_parser(
-        'Open the interactive route editor. Source can be a bag or an existing YAML.'
+        'Open the interactive route editor. Source can be a bag or one or more YAMLs.'
     )
     args = parser.parse_args(argv)
     try:
@@ -146,27 +205,76 @@ def route_editor_main(argv: Optional[List[str]] = None) -> int:
         print(f'[route_editor] config error: {exc}', file=sys.stderr)
         return 2
 
-    raw_latlons: List[Tuple[float, float]] = []
-    waypoints_latlon: List[Tuple[float, float]] = []
-    frame: Optional[LocalFrame] = None
-    reload_path: Optional[str] = None
-    output_path: str = cfg.io.output_path
+    # Import LayerSpec lazily so the bag-only path doesn't pay for matplotlib.
+    from .editor import LayerSpec
 
-    if cfg.io.input_waypoints:
-        wf = load_waypoints(cfg.io.input_waypoints)
-        waypoints_latlon = wf.waypoints_latlon
-        frame = frame_from_latlons(waypoints_latlon)
-        reload_path = cfg.io.input_waypoints
-        if not output_path:
-            output_path = cfg.io.input_waypoints
+    layer_specs: List[LayerSpec] = []
+    frame: Optional[LocalFrame] = None
+
+    input_paths = _resolve_input_paths(args, cfg)
+
+    if input_paths:
+        try:
+            output_paths = _resolve_output_paths(args, cfg, input_paths)
+        except ValueError as exc:
+            print(f'[route_editor] {exc}', file=sys.stderr)
+            return 2
+
+        loaded_routes: List[List[Tuple[float, float]]] = []
+        for path in input_paths:
+            if not os.path.exists(path):
+                print(f'[route_editor] input not found: {path}', file=sys.stderr)
+                return 2
+            wf = load_waypoints(path)
+            if not wf.waypoints_latlon:
+                print(f'[route_editor] {path}: file has no waypoints.', file=sys.stderr)
+                return 1
+            loaded_routes.append(wf.waypoints_latlon)
+
+        # Shared frame anchored on the first route's first waypoint so every
+        # route projects into the same x/y plane.
+        frame = frame_from_latlons(loaded_routes[0])
+        for i, (in_path, out_path, waypoints) in enumerate(
+            zip(input_paths, output_paths, loaded_routes)
+        ):
+            layer_specs.append(LayerSpec(
+                waypoints_latlon=waypoints,
+                output_path=out_path,
+                reload_path=in_path,
+                raw_trail_latlon=None,
+                label=os.path.basename(in_path),
+            ))
+
     elif cfg.io.bag_path:
         try:
             waypoints_latlon, raw_latlons, frame = _extract_from_bag(cfg)
         except Exception as exc:  # noqa: BLE001
             print(f'[route_editor] extraction failed: {exc}', file=sys.stderr)
             return 1
-        if not output_path:
-            output_path = _default_output_for_bag(cfg.io.bag_path)
+
+        # Bag extraction is single-route. Honour --output[0] if given, else
+        # config, else default-from-bag.
+        if args.output and len(args.output) > 1:
+            print(
+                '[route_editor] --output takes a single path when --bag is the '
+                f'source; got {len(args.output)}.',
+                file=sys.stderr,
+            )
+            return 2
+        cli_output = args.output[0] if args.output else None
+        out_path = (
+            os.path.expanduser(cli_output) if cli_output
+            else (os.path.expanduser(cfg.io.output_path) if cfg.io.output_path
+                  else _default_output_for_bag(cfg.io.bag_path))
+        )
+        layer_specs.append(LayerSpec(
+            waypoints_latlon=waypoints_latlon,
+            output_path=out_path,
+            reload_path=None,
+            raw_trail_latlon=raw_latlons if raw_latlons else None,
+            label=os.path.basename(cfg.io.bag_path.rstrip('/')) or 'from_bag',
+        ))
+
     else:
         print(
             '[route_editor] no input. Set io.bag_path or io.input_waypoints in the config, '
@@ -175,7 +283,7 @@ def route_editor_main(argv: Optional[List[str]] = None) -> int:
         )
         return 2
 
-    if not waypoints_latlon or frame is None:
+    if not layer_specs or frame is None:
         print('[route_editor] no waypoints to edit.', file=sys.stderr)
         return 1
 
@@ -183,14 +291,11 @@ def route_editor_main(argv: Optional[List[str]] = None) -> int:
     from .editor import RouteEditor
 
     editor = RouteEditor(
-        waypoints_latlon=waypoints_latlon,
+        layers=layer_specs,
         frame=frame,
-        output_path=output_path,
         editor_cfg=cfg.editor,
         output_cfg=cfg.output,
         nominal_speed_mps=cfg.estimation.nominal_speed_mps,
-        raw_trail_latlon=raw_latlons if raw_latlons else None,
-        input_path_for_reload=reload_path,
     )
     editor.run()
     return 0
