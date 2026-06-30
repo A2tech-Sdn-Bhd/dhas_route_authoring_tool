@@ -15,13 +15,13 @@ Controls:
     Left click on path  -> insert waypoint at projected foot (active route)
     Left click + drag   -> move the picked waypoint (active route)
     Right click on pt   -> delete that waypoint (active route)
-    Tab / Shift+Tab     -> cycle the active route
+    t / T (shift+t)     -> cycle the active route (forward / backward)
     s                   -> save the active route to its output path
     S (shift+s)         -> save all dirty routes
     u                   -> undo (active route, one step)
     r                   -> reload active route from disk (discards unsaved edits)
     h                   -> toggle raw trail visibility
-    q                   -> quit (auto-saves dirty routes if autosave_on_quit is true)
+    q                   -> quit (saves any dirty routes before closing)
 """
 
 from __future__ import annotations
@@ -240,7 +240,7 @@ class RouteEditor:
 
     # ------------------------------------------------------------------ helpers
     def _draw_help_footer(self) -> None:
-        multi_hint = '   Tab: switch route' if len(self._layers) > 1 else ''
+        multi_hint = '   t: switch route' if len(self._layers) > 1 else ''
         text = (
             'left-click path: insert (snapped)   |   left-drag pt: move   |   '
             'right-click pt: delete   |   s: save active   S: save all   '
@@ -404,7 +404,9 @@ class RouteEditor:
     def _on_key_press(self, event) -> None:
         key = event.key or ''
         lower = key.lower()
-        if key == 'S':           # shift+s -> save all dirty
+        # Shift+S -> save all dirty. Backends vary on how this arrives:
+        # Qt/Tk/GTK deliver 'S'; some report 'shift+s' verbatim.
+        if key == 'S' or lower == 'shift+s':
             self._save_all_dirty()
             return
         if lower == 's':
@@ -417,10 +419,10 @@ class RouteEditor:
             self._toggle_raw_trail()
         elif lower == 'q':
             plt.close(self._fig)
-        elif lower == 'tab':
-            self._cycle_active(+1)
-        elif key in ('shift+tab', 'ISO_Left_Tab'):
-            self._cycle_active(-1)
+        elif lower == 't':
+            # 't' cycles forward; Shift+T cycles backward.
+            step = -1 if (key == 'T' or lower == 'shift+t') else +1
+            self._cycle_active(step)
         elif lower in ('delete', 'backspace'):
             layer = self._active()
             if layer.selected_idx is not None and len(layer.waypoints_xy) > 2:
@@ -431,11 +433,30 @@ class RouteEditor:
                 self._redraw()
 
     def _on_close(self, _event) -> None:
-        if not self._editor.autosave_on_quit:
+        # Always save dirty routes on close. The original autosave_on_quit
+        # config knob silently dropped edits, which led to "I pressed q and
+        # nothing happened" — losing work is the worst possible failure mode
+        # for an editor. Respect the knob only as a hint that we should
+        # avoid touching disk when nothing is dirty (cheap default).
+        dirty = [lyr for lyr in self._layers if lyr.dirty]
+        if not dirty:
+            print('[route_editor] closed; no unsaved edits.')
             return
-        for layer in self._layers:
-            if layer.dirty:
-                self._save_layer(layer)
+        saved_paths = []
+        for layer in dirty:
+            if not layer.spec.output_path:
+                print(
+                    f'[route_editor] WARNING: {self._display_name(layer)} had unsaved '
+                    'edits but no output path was set; changes were dropped.'
+                )
+                continue
+            self._save_layer(layer)
+            saved_paths.append(layer.spec.output_path)
+        if saved_paths:
+            print(
+                f'[route_editor] closed; saved {len(saved_paths)} dirty '
+                f'route(s) on quit.'
+            )
 
     # ------------------------------------------------------------------ active-route control
     def _cycle_active(self, step: int) -> None:
