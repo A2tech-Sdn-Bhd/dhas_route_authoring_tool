@@ -29,3 +29,4 @@ htmlcov/
 *.local.yaml
 
 resource/bags
+bags/
