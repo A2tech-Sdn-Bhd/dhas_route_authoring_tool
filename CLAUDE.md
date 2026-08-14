@@ -15,7 +15,7 @@ It is **not** a runtime ROS 2 node: no `rclpy` node is started. It still ships a
 
 ```bash
 # From the workspace root.
-cd ~/dhas_dev_ws
+cd ~/P25-021-ros-workspace
 colcon build --packages-select route_authoring_tool
 source install/setup.bash
 
