@@ -10,7 +10,7 @@ __pycache__/
 build/
 install/
 log/
-
+bags/
 # pytest / coverage
 .pytest_cache/
 .coverage
@@ -29,4 +29,7 @@ htmlcov/
 *.local.yaml
 
 resource/bags
+<<<<<<< HEAD
 bags/
+=======
+>>>>>>> 6bf7eec (latest)
